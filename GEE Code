@@ -1,0 +1,109 @@
+// Coordinates of Berger Jetty boundary
+var boundaryCoordinates = [
+  [5.723123881394365, 5.51312171591038],
+  [5.722916168365549, 5.512520665036623],
+  [5.721592011694996, 5.512514526163714],
+  [5.720597925589043, 5.512566341028061],
+  [5.719533044065164, 5.512615847624939],
+  [5.717567996126595, 5.512632792111829],
+  [5.716914797837398, 5.51323037132258],
+  [5.712497536679566, 5.518390875935459],
+  [5.710600995800544, 5.517113008627522],
+  [5.711152439195491, 5.516283165465118],
+  [5.712233757529603, 5.51404684117331],
+  [5.713950515835857, 5.512620410342877],
+  [5.71565963497751, 5.511078302208935],
+  [5.718520754385683, 5.509626069786826],
+  [5.720524657548669, 5.509499143285167],
+  [5.721957835017191, 5.509415116321303],
+  [5.724001058347699, 5.508266343229198],
+  [5.727193338274299, 5.50855843585219],
+  [5.727595415670117, 5.509834887637127],
+  [5.728002824417895, 5.510656917069661],
+  [5.72918578751935, 5.511178434414331],
+  [5.731117363146556, 5.511550300734495],
+  [5.733286288720159, 5.512343262231407],
+  [5.733372297478654, 5.514480759494942],
+  [5.733404120539141, 5.514512524569117],
+  [5.731971259722323, 5.514752539726443],
+  [5.731674802824294, 5.514366447988913],
+  [5.731261041656605, 5.514283043339968],
+  [5.725844181376218, 5.513171785712253],
+  [5.725805117913934, 5.513288124001386],
+  [5.725741153256063, 5.513924324980309],
+  [5.725741770382033, 5.513947631968878],
+  [5.725580242014332, 5.515811185349642],
+  [5.725317021450607, 5.518135288442394],
+  [5.724855681536316, 5.518411427438179],
+  [5.724303571764795, 5.518336884786231],
+  [5.72357359364958, 5.5176152450631],
+  [5.723361113244709, 5.517124026397182],
+  [5.723365282770194, 5.515962413447443],
+  [5.723123881394365, 5.51312171591038]
+];
+
+// Defining the boundary as a polygon
+var boundary = ee.Geometry.Polygon(boundaryCoordinates);
+
+// Loading Sentinel-1 SAR data
+var sentinel1 = ee.ImageCollection('COPERNICUS/S1_GRD')
+  .filterBounds(boundary)
+  .filterDate('2023-01-01', '2023-12-31')
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .filter(ee.Filter.eq('resolution_meters', 10))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .select('VV');
+
+// Mean backscatter
+var meanBackscatter = sentinel1.mean().clip(boundary);
+
+// Oil spill detection
+var oilSpill = meanBackscatter.lt(-17); 
+
+// Load Sentinel-2 optical data
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2')
+  .filterBounds(boundary)
+  .filterDate('2023-01-01', '2023-12-31')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+  .median()
+  .clip(boundary);
+
+// Load Bathymetric data
+var gebco = ee.Image('NOAA/NGDC/ETOPO1')
+  .select('bedrock')
+  .clip(boundary);
+
+// Marine traffic data (example AIS dataset)
+var marineTraffic = ee.FeatureCollection('users/username/MarineTrafficData') // Replace with actual dataset
+  .filterBounds(boundary);
+
+// Visualization parameters
+var sarVis = {min: -30, max: 0, palette: ['blue', 'white']};
+var sentinel2Vis = {bands: ['B4', 'B3', 'B2'], min: 0, max: 3000};
+var bathymetryVis = {min: -1000, max: 0, palette: ['blue', 'cyan']};
+
+// Add layers to the map
+Map.centerObject(boundary, 15);
+Map.addLayer(meanBackscatter, sarVis, 'Sentinel-1 Backscatter');
+Map.addLayer(oilSpill.mask(oilSpill), {palette: ['black']}, 'Oil Spill');
+Map.addLayer(sentinel2, sentinel2Vis, 'Sentinel-2 RGB');
+Map.addLayer(gebco, bathymetryVis, 'Bathymetry');
+Map.addLayer(marineTraffic, {color: 'red'}, 'Marine Traffic');
+
+// Export oil spill raster
+Export.image.toDrive({
+  image: oilSpill,
+  description: 'Oil_Spill_Mapping',
+  scale: 10,
+  region: boundary,
+  fileFormat: 'GeoTIFF'
+});
+
+// Export Sentinel-2 RGB composite
+Export.image.toDrive({
+  image: sentinel2,
+  description: 'Sentinel2_RGB_Composite',
+  scale: 10,
+  region: boundary,
+  fileFormat: 'GeoTIFF'
+});
